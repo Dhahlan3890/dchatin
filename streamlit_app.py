@@ -1,56 +1,75 @@
 import streamlit as st
-from openai import OpenAI
+from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+import torch
 
 # Show title and description.
-st.title("💬 Chatbot")
+st.title("🦒 Falcon-7B Chatbot")
 st.write(
-    "This is a simple chatbot that uses OpenAI's GPT-3.5 model to generate responses. "
-    "To use this app, you need to provide an OpenAI API key, which you can get [here](https://platform.openai.com/account/api-keys). "
-    "You can also learn how to build this app step by step by [following our tutorial](https://docs.streamlit.io/develop/tutorials/llms/build-conversational-apps)."
+    "This chatbot uses the Falcon-7B model for generating responses. You can have a conversation with the AI below. "
+    "This model is optimized for text generation tasks."
 )
 
-# Ask user for their OpenAI API key via `st.text_input`.
-# Alternatively, you can store the API key in `./.streamlit/secrets.toml` and access it
-# via `st.secrets`, see https://docs.streamlit.io/develop/concepts/connections/secrets-management
-openai_api_key = st.text_input("OpenAI API Key", type="password")
-if not openai_api_key:
-    st.info("Please add your OpenAI API key to continue.", icon="🗝️")
-else:
+# Load the model and tokenizer.
+@st.cache_resource  # Cache the model and tokenizer to avoid reloading on every run.
+def load_model():
+    model_name = "tiiuae/falcon-7b"
+    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
+    model = AutoModelForCausalLM.from_pretrained(
+        model_name,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        device_map="auto",
+    )
+    text_gen_pipeline = pipeline(
+        "text-generation",
+        model=model,
+        tokenizer=tokenizer,
+        torch_dtype=torch.bfloat16,
+        trust_remote_code=True,
+        device_map="auto",
+    )
+    return tokenizer, text_gen_pipeline
 
-    # Create an OpenAI client.
-    client = OpenAI(api_key=openai_api_key)
+tokenizer, text_gen_pipeline = load_model()
 
-    # Create a session state variable to store the chat messages. This ensures that the
-    # messages persist across reruns.
-    if "messages" not in st.session_state:
-        st.session_state.messages = []
+# Create a session state variable to store chat messages.
+if "messages" not in st.session_state:
+    st.session_state.messages = []
 
-    # Display the existing chat messages via `st.chat_message`.
-    for message in st.session_state.messages:
-        with st.chat_message(message["role"]):
-            st.markdown(message["content"])
+# Display existing chat messages.
+for message in st.session_state.messages:
+    with st.chat_message(message["role"]):
+        st.markdown(message["content"])
 
-    # Create a chat input field to allow the user to enter a message. This will display
-    # automatically at the bottom of the page.
-    if prompt := st.chat_input("What is up?"):
+# Create a chat input field.
+if prompt := st.chat_input("Say something to the Falcon-7B chatbot!"):
+    # Add user's message to the session state.
+    st.session_state.messages.append({"role": "user", "content": prompt})
+    with st.chat_message("user"):
+        st.markdown(prompt)
 
-        # Store and display the current prompt.
-        st.session_state.messages.append({"role": "user", "content": prompt})
-        with st.chat_message("user"):
-            st.markdown(prompt)
+    # Generate a response using the Falcon-7B model.
+    with st.chat_message("assistant"):
+        response_container = st.empty()
+        response_text = ""
 
-        # Generate a response using the OpenAI API.
-        stream = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": m["role"], "content": m["content"]}
-                for m in st.session_state.messages
-            ],
-            stream=True,
-        )
+        try:
+            # Generate the response with the pipeline.
+            sequences = text_gen_pipeline(
+                prompt,
+                max_length=200,
+                do_sample=True,
+                top_k=10,
+                num_return_sequences=1,
+                eos_token_id=tokenizer.eos_token_id,
+            )
+            response_text = sequences[0]["generated_text"]
 
-        # Stream the response to the chat using `st.write_stream`, then store it in 
-        # session state.
-        with st.chat_message("assistant"):
-            response = st.write_stream(stream)
-        st.session_state.messages.append({"role": "assistant", "content": response})
+            # Display the response.
+            response_container.markdown(response_text)
+
+        except Exception as e:
+            st.error(f"Error: {e}")
+
+        # Store the assistant's response in the session state.
+        st.session_state.messages.append({"role": "assistant", "content": response_text})
