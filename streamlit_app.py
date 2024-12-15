@@ -1,75 +1,57 @@
 import streamlit as st
-from transformers import AutoTokenizer, AutoModelForCausalLM, pipeline
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 
-# Show title and description.
-st.title("🦒 Falcon-7B Chatbot")
-st.write(
-    "This chatbot uses the Falcon-7B model for generating responses. You can have a conversation with the AI below. "
-    "This model is optimized for text generation tasks."
-)
-
-# Load the model and tokenizer.
-@st.cache_resource  # Cache the model and tokenizer to avoid reloading on every run.
+# Load the model and tokenizer
+@st.cache_resource
 def load_model():
-    model_name = "tiiuae/falcon-7b"
-    tokenizer = AutoTokenizer.from_pretrained(model_name, trust_remote_code=True)
-    model = AutoModelForCausalLM.from_pretrained(
-        model_name,
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-        device_map="auto",
-    )
-    text_gen_pipeline = pipeline(
-        "text-generation",
-        model=model,
-        tokenizer=tokenizer,
-        torch_dtype=torch.bfloat16,
-        trust_remote_code=True,
-        device_map="auto",
-    )
-    return tokenizer, text_gen_pipeline
+    tokenizer = AutoTokenizer.from_pretrained("suayptalha/FastLlama-3.2-1B-Instruct")
+    model = AutoModelForCausalLM.from_pretrained("suayptalha/FastLlama-3.2-1B-Instruct")
+    return tokenizer, model
 
-tokenizer, text_gen_pipeline = load_model()
+tokenizer, model = load_model()
 
-# Create a session state variable to store chat messages.
+# Chatbot interface
+def generate_response(user_input, tokenizer, model, max_length=512):
+    inputs = tokenizer(user_input, return_tensors="pt", truncation=True)
+    outputs = model.generate(
+        inputs.input_ids,
+        max_length=max_length,
+        num_return_sequences=1,
+        pad_token_id=tokenizer.eos_token_id
+    )
+    response = tokenizer.decode(outputs[0], skip_special_tokens=True)
+    return response
+
+# Streamlit app
+st.title("FastLlama Chatbot")
+st.write("A chatbot powered by FastLlama-3.2-1B-Instruct model.")
+
+# Chat history
 if "messages" not in st.session_state:
-    st.session_state.messages = []
+    st.session_state["messages"] = []
 
-# Display existing chat messages.
-for message in st.session_state.messages:
-    with st.chat_message(message["role"]):
-        st.markdown(message["content"])
+# User input
+with st.form(key="chat_form"):
+    user_input = st.text_input("You:", value="", placeholder="Type your message here...")
+    submitted = st.form_submit_button("Send")
 
-# Create a chat input field.
-if prompt := st.chat_input("Say something to the Falcon-7B chatbot!"):
-    # Add user's message to the session state.
-    st.session_state.messages.append({"role": "user", "content": prompt})
-    with st.chat_message("user"):
-        st.markdown(prompt)
+if submitted and user_input:
+    # Display user input in chat
+    st.session_state["messages"].append({"role": "user", "content": user_input})
 
-    # Generate a response using the Falcon-7B model.
-    with st.chat_message("assistant"):
-        response_container = st.empty()
-        response_text = ""
+    # Generate response
+    with st.spinner("Generating response..."):
+        bot_response = generate_response(user_input, tokenizer, model)
+        st.session_state["messages"].append({"role": "bot", "content": bot_response})
 
-        try:
-            # Generate the response with the pipeline.
-            sequences = text_gen_pipeline(
-                prompt,
-                max_length=200,
-                do_sample=True,
-                top_k=10,
-                num_return_sequences=1,
-                eos_token_id=tokenizer.eos_token_id,
-            )
-            response_text = sequences[0]["generated_text"]
+# Display chat history
+for message in st.session_state["messages"]:
+    if message["role"] == "user":
+        st.markdown(f"**You:** {message['content']}")
+    else:
+        st.markdown(f"**Bot:** {message['content']}")
 
-            # Display the response.
-            response_container.markdown(response_text)
-
-        except Exception as e:
-            st.error(f"Error: {e}")
-
-        # Store the assistant's response in the session state.
-        st.session_state.messages.append({"role": "assistant", "content": response_text})
+# Clear chat button
+if st.button("Clear Chat"):
+    st.session_state["messages"] = []
