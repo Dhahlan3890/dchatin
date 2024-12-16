@@ -29,7 +29,7 @@ def respond(
 ):
     """Generate a response for a multi-turn chat conversation."""
     # Prepare the messages in the correct format for the API
-    messages = [{"role": "system", "content": system_message}]
+    messages = [{"role": "system", "content": system_message}]  # Add system message first.
 
     for user_input, assistant_reply in history:
         if user_input:
@@ -37,6 +37,7 @@ def respond(
         if assistant_reply:
             messages.append({"role": "assistant", "content": assistant_reply})
 
+    # Add the current user message at the end.
     messages.append({"role": "user", "content": message})
 
     response = ""
